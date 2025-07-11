@@ -360,7 +360,7 @@ class VisionTransformer(nn.Module):
     return features
 
 
-class FactorizedEncoder(nn.Module):
+class FactorizedEncoder(nn.Module):      #? this is the main model
   """Factorized encoder from the paper `ViViT: A Video Vision Transformer`.
 
   This is an implementation of model-2 in the paper. It applies ViT model for
@@ -370,15 +370,15 @@ class FactorizedEncoder(nn.Module):
   """
 
   patch_size: int = 18
-  pos_emb_shape: tuple[int, int, int] = (16, 16, 16)
+  pos_emb_shape: tuple[int, int, int] = (16, 16, 16)  #? NTU why a tuple of 16
   model_dim: int = 768
-  num_spatial_layers: int = 12
-  num_temporal_layers: int = 4
+  num_spatial_layers: int = 12    #?
+  num_temporal_layers: int = 4    #?
   num_heads: int = 12
   mlp_dim: int = 3072
-  atten_logit_cap: float = 0.0
+  atten_logit_cap: float = 0.0   #? set to 50
   norm_policy: str = 'pre'
-  scan: bool = False
+  scan: bool = False   #? generally it is set to true
 
   def __call__(
       self,
