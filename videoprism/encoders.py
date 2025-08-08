@@ -26,6 +26,7 @@ from jax import numpy as jnp
 import numpy as np
 from videoprism import layers
 
+
 Array = jax.Array
 Variables = nn.module.VariableDict
 
@@ -62,7 +63,7 @@ def _image_to_patch(inputs: Array, patch_size: int) -> Array:
   if len(inputs.shape) < 4:
     raise ValueError(
         f'Image should be formatted as 4D [B, H, W, C], Shape: {inputs.shape}'
-    )
+    )  
   height, width, channels = inputs.shape[-3:]
 
   if height % patch_size != 0 or width % patch_size != 0:
@@ -71,19 +72,19 @@ def _image_to_patch(inputs: Array, patch_size: int) -> Array:
         f'of patch_size ({patch_size}).'
     )
 
-  row_blocks = height // patch_size
-  column_blocks = width // patch_size
+  row_blocks = height // patch_size    #? 288/18 = 16
+  column_blocks = width // patch_size  #? 288/18 = 16
 
   patches = einops.rearrange(
-      inputs,
-      '... (m p)(n q) c->...(m n)(p q c)',
-      m=row_blocks,
-      n=column_blocks,
-      p=patch_size,
-      q=patch_size,
-      c=channels,
+      inputs,   #? the shape is (B, H, W, C)
+      '... (m p)(n q) c->...(m n)(p q c)',  #? ... (16 * 18)(16 * 18) 3 -> ... (16 * 16) (18 * 18 * 3)
+      m=row_blocks,      #? 16
+      n=column_blocks,   #? 16
+      p=patch_size,      #? 18
+      q=patch_size,      #? 18
+      c=channels,        #? 3
   )
-  return patches
+  return patches   #? (B*T, 256, 972)
 
 
 def _interpolate_emb_1d(emb: Array, target_emb_length: int) -> Array:
@@ -252,12 +253,12 @@ class TrainablePositionalEmbedding(nn.Module):
     lookup_style: Style of lookup, one of index or matmul.
   """
 
-  embedding_dim: int = 0
-  max_seq_length: int = 10_240
-  lookup_style: str = 'matmul'
+  embedding_dim: int = 0         #? set to 768
+  max_seq_length: int = 10_240   #? set to 256
+  lookup_style: str = 'matmul'   #? set to matmul by default and not changed
 
   @nn.compact
-  def __call__(self, seq_length: int) -> Array:
+  def __call__(self, seq_length: int) -> Array:   #? comes here after step 9 with seq_length = 256
     """Generates a jax.Array of embedding lookup result.
 
     Args:
@@ -266,19 +267,19 @@ class TrainablePositionalEmbedding(nn.Module):
     Returns:
       A jax.Array of shape [1, seq_length, embedding_dim].
     """
-    position = jnp.arange(seq_length, dtype=jnp.int32)[jnp.newaxis, :]
-    pos_emb_var = self.param(
+    position = jnp.arange(seq_length, dtype=jnp.int32)[jnp.newaxis, :]  #? this is a 1D array of shape (1, seq_length) = (1, 256)
+    pos_emb_var = self.param(   #? similar to torch nn.Embeddings
         'emb_var',
-        default_kernel_init,
-        [self.max_seq_length, self.embedding_dim],
+        default_kernel_init,   #? layers.default_kernel_init
+        [self.max_seq_length, self.embedding_dim],  #? (256, 768) as embedding_dim is set to 768
     )
-    pos_emb_var = jax.lax.slice_in_dim(pos_emb_var, 0, seq_length, axis=0)
+    pos_emb_var = jax.lax.slice_in_dim(pos_emb_var, 0, seq_length, axis=0)    #? slice the first `seq_length` rows, so it becomes (256, 768) as max_seq_length is same as seq_length
     if self.lookup_style == 'matmul':
-      one_hot_ids = jax.nn.one_hot(position, seq_length, dtype=jnp.float32)
-      embs = jnp.einsum('...y,yz->...z', one_hot_ids, pos_emb_var)
+      one_hot_ids = jax.nn.one_hot(position, seq_length, dtype=jnp.float32)  #? basically a eye matrix of shape (1, 256, 256)
+      embs = jnp.einsum('...y,yz->...z', one_hot_ids, pos_emb_var)   #? einsum is like a matrix multiplication, so the shape becomes (1, 256, 768) after (1, 256, 256) @ (256, 768)
     else:
       raise ValueError(f'Unknown lookup style: `{self.lookup_style}`.')
-    return embs
+    return embs  #? returns a jax array of shape (1, 256, 768) as the positional embedding for the sequence of length 256
 
 
 class VisionTransformer(nn.Module):
@@ -309,7 +310,7 @@ class VisionTransformer(nn.Module):
     scan: Whether to use `nn.remat` and`nn.scan`.
   """
 
-  num_tfm_layers: int = 12
+  num_tfm_layers: int = 12  #? remains 12
   mlp_dim: int = 3072
   num_heads: int = 12
   xformer_has_bias: bool = True
@@ -337,25 +338,25 @@ class VisionTransformer(nn.Module):
     Returns:
       Output tensor of shape [B, N, D].
     """
-    features = inputs
-    if paddings is None:  #? paddings is None for aux layer
-      paddings = jnp.zeros(features.shape[:-1], dtype=features.dtype)
-    features = layers.StackedTransformer(
+    features = inputs   #? patches (B*T, N, D) = (B*T, 256, 768)
+    if paddings is None:   #? yes set  to none
+      paddings = jnp.zeros(features.shape[:-1], dtype=features.dtype)  #? paddings is set to zeros of shape (B*T, N) = (B*T, 256)
+    features = layers.StackedTransformer(  #? step 11
         name='transformers_stack',
-        num_layers=self.num_tfm_layers,
-        hidden_dim=self.mlp_dim,
-        num_heads=self.num_heads,
-        dropout_prob=self.xformer_dropout_prob,
-        atten_dropout_prob=self.xformer_atten_dropout_prob,
-        residual_dropout_prob=self.xformer_residual_dropout_prob,
-        relu_dropout_prob=self.xformer_relu_dropout_prob,
-        use_bias=self.xformer_has_bias,
-        atten_logit_cap=self.atten_logit_cap,
-        norm_policy=self.norm_policy,
-        internal_enable_per_dim_scale=False,
-        activation_fn=layers.gelu,
-        enable_causal_atten=False,
-        scan=self.scan,
+        num_layers=self.num_tfm_layers, #? set to 12
+        hidden_dim=self.mlp_dim,  #? set to 3072
+        num_heads=self.num_heads, #? set to 12
+        dropout_prob=self.xformer_dropout_prob, #? set to 0.0 by default
+        atten_dropout_prob=self.xformer_atten_dropout_prob,  #? set to None by default
+        residual_dropout_prob=self.xformer_residual_dropout_prob,  #? set to None by default
+        relu_dropout_prob=self.xformer_relu_dropout_prob,  #? set to None by default
+        use_bias=self.xformer_has_bias, #? set to true by default
+        atten_logit_cap=self.atten_logit_cap,  #? set to 50.0
+        norm_policy=self.norm_policy,    #? 'pre' by default
+        internal_enable_per_dim_scale=False,   #? set to false by default
+        activation_fn=layers.gelu,            #? set to gelu by default
+        enable_causal_atten=False,           #? set to false by default
+        scan=self.scan,                      #? set to True
     )(features, paddings, train=train)
     return features
 
@@ -368,23 +369,23 @@ class FactorizedEncoder(nn.Module):      #? this is the main model
 
   Reference: https://arxiv.org/abs/2103.15691
   """
-
-  patch_size: int = 18
+  #? these are set after step 1-3 when the model is initialized
+  patch_size: int = 18   #? always 18 for all
   pos_emb_shape: tuple[int, int, int] = (16, 16, 16)  #? NTU why a tuple of 16
   model_dim: int = 768
   num_spatial_layers: int = 12    #?
   num_temporal_layers: int = 4    #?
-  num_heads: int = 12
-  mlp_dim: int = 3072
-  atten_logit_cap: float = 0.0   #? set to 50
+  num_heads: int = 12             #? set to 12
+  mlp_dim: int = 3072             #? set to 3072
+  atten_logit_cap: float = 0.0    #? set to 50
   norm_policy: str = 'pre'
   scan: bool = False   #? generally it is set to true
-
-  def __call__(
+  #? why no nn.compact here?
+  def __call__(      #? this is called after step 5
       self,
       inputs: Array,
-      train: bool = False,
-      return_intermediate: bool = False,
+      train: bool = False,    #? set tp false for now
+      return_intermediate: bool = False,   #? set to false by default
       frame_paddings: Array | None = None,
   ) -> tuple[Array, dict[str, Array]]:
     """Computes predictions for batched inputs.
@@ -406,9 +407,9 @@ class FactorizedEncoder(nn.Module):      #? this is the main model
     reshaped_inputs = inputs.reshape(b * t, h, w, c)  # (B * T, H, W, C).
 
     # Tokenization.
-    patches = _image_to_patch(reshaped_inputs, self.patch_size)
+    patches = _image_to_patch(reshaped_inputs, self.patch_size)  #? step 6  the shape is (B*T, (H * W / P^2), P^2 * C) = (B*T, 256, 972)
     patches_paddings = None
-    if frame_paddings is not None:
+    if frame_paddings is not None:   #todo set to None by default, need to explore later
       assert frame_paddings.shape == (b, t)
       reshaped_frame_paddings = frame_paddings.reshape(b * t)  # (B * T,).
       num_patches = patches.shape[1]
@@ -416,23 +417,23 @@ class FactorizedEncoder(nn.Module):      #? this is the main model
           reshaped_frame_paddings[:, jnp.newaxis], num_patches, axis=-1
       )  # (B * T, num_patches).
 
-    embeddings, outputs = self.encode_with_patches(
-        patches=patches,
-        image_shape=(t, h, w),
+    embeddings, outputs = self.encode_with_patches(   #? step 7
+        patches=patches,         #? (B*T, 256, 972)
+        image_shape=(t, h, w),   #? (T, H, W) = (16, 288, 288)
         train=train,
-        return_intermediate=return_intermediate,
-        patches_paddings=patches_paddings,
+        return_intermediate=return_intermediate,    #? false
+        patches_paddings=patches_paddings,          #? None as frame_paddings is None
     )
     return embeddings, outputs
 
-  @nn.compact
-  def encode_with_patches(
+  @nn.compact   #? check why nn.compact is used here, but not before
+  def encode_with_patches(    #? this is called in step 7
       self,
       patches: Array,
       image_shape: tuple[int, int, int],
       train: bool = False,
-      return_intermediate: bool = False,
-      patches_paddings: Array | None = None,
+      return_intermediate: bool = False,      #? set to false
+      patches_paddings: Array | None = None,  #? set to None
   ) -> tuple[Array, dict[str, Array]]:
     """Computes predictions for patches.
 
@@ -450,87 +451,93 @@ class FactorizedEncoder(nn.Module):      #? this is the main model
       outputs: A dictionary of additional outputs, including `spatial_features`
         of shape [B, T * N, D]. Empty if `return_intermediate` is False.
     """
-    t, h, w = image_shape
-    b = patches.shape[0] // t
-
-    patches = layers.FeedForward(  # (B * T, N, D).
+    t, h, w = image_shape   #? t = 16, h = 288, w = 288
+    b = patches.shape[0] // t    #? batch size
+    #with jax.disable_jit():
+    patches = layers.FeedForward(  # (B * T, N, D).  #? this is step 8
         name='patch_projection',
-        output_dim=self.model_dim,
-        activation_fn=layers.identity,
+        output_dim=self.model_dim,  #? 768
+        activation_fn=layers.identity,  #? means no activation
     )(patches)
 
     # Add spatial positional encoding.
-    spatial_pos_emb_shape = self.pos_emb_shape[-2:]
-    spatial_seq_length = np.prod(spatial_pos_emb_shape)
-    spatial_pos_emb = TrainablePositionalEmbedding(
+    spatial_pos_emb_shape = self.pos_emb_shape[-2:]  #? this is (16, 16)
+    spatial_seq_length = np.prod(spatial_pos_emb_shape)  #? this is 16 * 16 = 256
+    spatial_pos_emb = TrainablePositionalEmbedding(   #? step 9  This returns a jax array of shape (1, 256, 768) with trainable params initialized via lecun_normal
         name='spatial_pos_emb',
-        embedding_dim=self.model_dim,
-        max_seq_length=spatial_seq_length,
+        embedding_dim=self.model_dim,       #? 768
+        max_seq_length=spatial_seq_length,  #? 256
     )(seq_length=spatial_seq_length)
-    num_row_patches = h // self.patch_size
-    num_col_patches = w // self.patch_size
-    if spatial_pos_emb_shape != (num_row_patches, num_col_patches):
+    num_row_patches = h // self.patch_size   #? 288 / 18 = 16
+    num_col_patches = w // self.patch_size   #? 288 / 18 = 16
+    if spatial_pos_emb_shape != (num_row_patches, num_col_patches):    #? shapes are same for now, so no interpolate
       spatial_pos_emb = _interpolate_emb_2d(
           spatial_pos_emb,
           spatial_pos_emb_shape,
           (num_row_patches, num_col_patches),
       )
-    patches += spatial_pos_emb  # (B * T, N, D).
-
+    patches += spatial_pos_emb  # (B * T, N, D).  #! VideoPrismSpatialEmbeddings out till here
+    print(f"{patches.shape=}, {patches[0, :3, :3]}")
     # Get features from the spatial encoder.
-    features = VisionTransformer(  # (B * T, N, D).
+    features = VisionTransformer(  # (B * T, N, D). #? step 10  this is equivalent to a layer
         name='spatial_encoder',
-        num_tfm_layers=self.num_spatial_layers,
-        mlp_dim=self.mlp_dim,
-        num_heads=self.num_heads,
-        atten_logit_cap=self.atten_logit_cap,
-        norm_policy=self.norm_policy,
+        num_tfm_layers=self.num_spatial_layers, #? 12
+        mlp_dim=self.mlp_dim, #? 3072
+        num_heads=self.num_heads, #? 12
+        atten_logit_cap=self.atten_logit_cap,  #? 50.0
+        norm_policy=self.norm_policy,  #? 'pre'
         scan=self.scan,
     )(patches, train=train, paddings=patches_paddings)
+    print(f"spatial_encoder {features.shape=}, {features[0, :3, :3]}")
     features = layers.LayerNorm(name='spatial_ln')(features)
-    spatial_features = features
+    print(f"spatial_encoder ln {features.shape=}, {features[0, :3, :3]}")
+    spatial_features = features    #?  (B*T, N, D) = (B*T, 256, 768)
 
     # Instead of mean pooling, we keep the spatial tokens.
     # Shape = (B * N, T, D).
-    features = einshape.jax_einshape('(bt)nd->(bn)td', features, t=t)
+    features = einshape.jax_einshape('(bt)nd->(bn)td', features, t=t)  #? (B*T, 256, 768) -> (B * N, T, D) = (B * 256, 16, 768)
     temporal_paddings = None
-    if patches_paddings is not None:
+    #todo
+    if patches_paddings is not None:  #? it is none
       temporal_paddings = einshape.jax_einshape(
           '(bt)n->(bn)t', patches_paddings, t=t
       )  # (B * N, T).
 
     # Add temporal positional encoding.
-    temporal_seq_length = self.pos_emb_shape[0]
+    temporal_seq_length = self.pos_emb_shape[0] #? this is 16
     temporal_pos_emb = TrainablePositionalEmbedding(
         name='temporal_pos_emb',
-        embedding_dim=self.model_dim,
-        max_seq_length=temporal_seq_length,
-    )(seq_length=temporal_seq_length)
-    if temporal_seq_length != t:
+        embedding_dim=self.model_dim,  #? 768
+        max_seq_length=temporal_seq_length, #? 16
+    )(seq_length=temporal_seq_length) #? this returns a jax array of shape (1, 16, 768) with trainable params initialized via lecun_normal
+    if temporal_seq_length != t:  #? t is 16, so no interpolation needed
       temporal_pos_emb = _interpolate_emb_1d(temporal_pos_emb, t)
     features += temporal_pos_emb
-
+    print(f"temporal embedding {features.shape=}, {features[0, :3, :3]}")
     # Get features from the temporal encoder.
     features = VisionTransformer(
         name='temporal_encoder',
-        num_tfm_layers=self.num_temporal_layers,
-        mlp_dim=self.mlp_dim,
-        num_heads=self.num_heads,
-        atten_logit_cap=self.atten_logit_cap,
-        norm_policy=self.norm_policy,
-        scan=self.scan,
+        num_tfm_layers=self.num_temporal_layers, #? 4
+        mlp_dim=self.mlp_dim, #? 3072
+        num_heads=self.num_heads, #? 12
+        atten_logit_cap=self.atten_logit_cap, #? 50.0
+        norm_policy=self.norm_policy, #? 'pre'
+        scan=self.scan,   #? true
     )(features, train=train, paddings=temporal_paddings)
-    features = layers.LayerNorm(name='temporal_ln')(features)
+    print(f"temporal_encoder {features.shape=}, {features[0, :3, :3]}")
+    features = layers.LayerNorm(name='temporal_ln')(features)  #? this is layernorm2
+    print(f"temporal_encoder ln {features.shape=}, {features[0, :3, :3]}")
     features = einshape.jax_einshape(  # (B, T * N, D).
-        '(bn)td->b(tn)d', features, b=b
+        '(bn)td->b(tn)d', features, b=b   #? (B * 256, 16, 768) -> (B, T * N, D) = (B, 256 * 16, 768)
     )
-
+    print(f"final {features.shape=}, {features[0, :3, :3]}")
     embeddings, outputs = features, {}
     if return_intermediate:
       outputs['spatial_features'] = einshape.jax_einshape(
           '(bt)nd->b(tn)d', spatial_features, t=t
       )
-    return embeddings, outputs  #? embeddings (1, 4096, 768), outputs dict with tensor (1, 16, 256, 768)
+    
+    return embeddings, outputs
 
 
 class FactorizedVideoClassifier(nn.Module):

@@ -224,7 +224,7 @@ class LayerNorm(nn.Module):
           'scale', nn.initializers.constant(init_value), [input_dim]
       )
       if not self.direct_scale:
-        scale += 1.0
+        scale += 1.0            #? this is always invoked
       normed_inputs *= scale
     if self.use_bias:
       bias = self.param('bias', nn.initializers.zeros_init(), [input_dim])
@@ -258,6 +258,11 @@ class FeedForward(nn.Module):
         bias_init=self.bias_init,
         name='linear',
     )(inputs)
+    # jax.debug.print(
+    #     "intermediate before activation: {}",
+    #     projected_inputs[0, :3, :3] 
+    # )
+    # print(self.activation_fn)
     return self.activation_fn(projected_inputs)
 
 
@@ -331,6 +336,10 @@ class TransformerFeedForward(nn.Module):
 
     # Apply first FFN layer.
     activations = self._ffn(self.hidden_dim, name='ffn_layer1')(inputs)
+    # jax.debug.print(
+    #     "intermediate after activation: {}",
+    #     activations[0, :3, :3],
+    # )
 
     # Apply paddings if not None.
     if paddings is not None:
@@ -403,6 +412,10 @@ class AttentionProjection(nn.Module):
       is_output_projection is True or [..., num_heads, dim_per_head]
       otherwise.
     """
+    # jax.debug.print(
+    #     "inputs: {}",
+    #     inputs[0,:3,:3] if inputs.ndim == 3 else inputs[0,:3,0,:3],
+    # )
     # Sort the available symbols to avoid nondeterminism.
     eqn_sym = ''.join(sorted(set(string.ascii_uppercase) - set('DHN')))
     output_dim = (
@@ -430,6 +443,10 @@ class AttentionProjection(nn.Module):
           [output_dim] if self.is_output_projection else hd_shape,
       )
       ret += b
+    # jax.debug.print(
+    #     "projected inputs: {}",
+    #     ret[0, :3, :3] if ret.ndim == 3 else ret[0, :3, 0, :3],
+    # )
     return ret
 
 
@@ -521,6 +538,10 @@ class DotProductAttention(nn.Module):
     # Note that since this caps the negative side as well, caller must defer the
     # pad-with-very-negative-logits logic to after this function returns.
     logits = cap * jnp.tanh(logits / cap)
+    # jax.debug.print(
+    #     "capped logits: {}",
+    #     logits[0, :3, 0, :3],
+    # )
     return logits
 
   def _atten_logits(self, query: Array, key: Array) -> Array:
@@ -577,6 +598,7 @@ class DotProductAttention(nn.Module):
       logits = jnp.multiply(logits, 1.0 / np.sqrt(key.shape[-1]))
 
     logits = self._cap_logits(logits)
+
     # Attention softmax is always carried out in fp32.
     logits = logits.astype(jnp.float32)
     # Apply attention masking.
@@ -649,6 +671,10 @@ class DotProductAttention(nn.Module):
     encoded, atten_probs = self._dot_atten(
         query_proj, key_proj, value_proj, atten_mask, train=train
     )
+    # jax.debug.print(
+    #     "attention values op: {}",
+    #     encoded[0, :3, 0, :3],
+    # )
 
     # Post projection. Setting is_output_projection=True to set the projection
     # direction from hidden dim to input dim. Output projection follows
@@ -662,6 +688,10 @@ class DotProductAttention(nn.Module):
         is_output_projection=True,
         use_bias=self.use_bias,
     )(encoded)
+    # jax.debug.print(
+    #     "after attention projection: {}",
+    #     encoded[0, :3, :3],
+    # )
     return encoded, atten_probs
 
 
@@ -728,6 +758,7 @@ class Transformer(nn.Module):
     Returns:
       The fflayer output with shape [B, T, D].
     """
+    # jax.debug.print("before norm: {}", inputs[0, :3, :3])
 
     if self.norm_policy == 'primer_hybrid':
       inputs_normalized = self._ln(name='pre_layer_norm')(inputs)
@@ -735,7 +766,7 @@ class Transformer(nn.Module):
       inputs_normalized = self._ln(name='layer_norm')(inputs)
     else:
       inputs_normalized = inputs
-
+    jax.debug.print("after norm: {}", inputs_normalized[0, :3, :3])
     # Compute self-attention, key/value vectors are the input itself.
     atten_outputs, _ = DotProductAttention(
         name='self_attention',
@@ -753,7 +784,10 @@ class Transformer(nn.Module):
         atten_mask=atten_mask,
         train=train,
     )
-
+    jax.debug.print(
+        "after attention, before residual and before ffn: {}",
+        atten_outputs[0, :3, :3],
+    )
     if self.norm_policy == 'primer_hybrid':
       atten_outputs = self._ln(name='post_layer_norm')(atten_outputs)
     elif self.norm_policy == 'post':
@@ -767,7 +801,10 @@ class Transformer(nn.Module):
 
     if self.norm_policy == 'post_skip':
       atten_outputs = self._ln(name='layer_norm')(atten_outputs)
-
+    jax.debug.print(
+        "after residual and before ffn: {}",
+        atten_outputs[0, :3, :3],
+    )
     # Apply FFN layer.
     outputs = TransformerFeedForward(
         name='ff_layer',
@@ -778,6 +815,10 @@ class Transformer(nn.Module):
         relu_dropout_prob=self.relu_dropout_prob,
         norm_policy=self.norm_policy,
     )(atten_outputs, paddings=paddings, train=train)
+    jax.debug.print(
+        "after ffn, before final norm: {}",
+        outputs[0, :3, :3],
+    )
     return outputs
 
 
