@@ -433,7 +433,7 @@ class AttentionProjection(nn.Module):
     return ret
 
 
-class PerDimScale(nn.Module):
+class PerDimScale(nn.Module):  #! used in attentokenpooler
   """A layer to scale individual dimensions of the input."""
 
   @nn.compact
@@ -966,9 +966,9 @@ class AttenTokenPoolingLayer(nn.Module):
   """
 
   query_dim: int | None = None
-  hidden_dim: int = 0
-  num_heads: int = 1
-  num_queries: int = 1
+  hidden_dim: int = 0   #? 4*768
+  num_heads: int = 1    #? 12
+  num_queries: int = 1  #? 1
   add_layer_norm: bool = True
   dropout_prob: float = 0.0
   use_qk_norm: bool = False
@@ -997,12 +997,12 @@ class AttenTokenPoolingLayer(nn.Module):
     hidden_dim = self.hidden_dim if self.hidden_dim > 0 else 4 * input_dim
     batch_size, seq_length = tokens.shape[0], tokens.shape[-2]
 
-    query = self.param(
+    query = self.param(     #? a learned parameter
         'pooling_attention_query',
         default_kernel_init,
-        [self.num_queries, query_dim],
+        [self.num_queries, query_dim],  #? (1, 768)
     )
-    query = jnp.tile(query[jnp.newaxis, :, :], [batch_size, 1, 1])
+    query = jnp.tile(query[jnp.newaxis, :, :], [batch_size, 1, 1])  #? (B, N, D) query repeats for the batch_size
 
     if paddings is None:
       paddings = jnp.zeros([batch_size, seq_length], dtype=query.dtype)
@@ -1010,20 +1010,20 @@ class AttenTokenPoolingLayer(nn.Module):
     atten_mask = _convert_paddings_to_mask(paddings, dtype=paddings.dtype)
     outputs, _ = DotProductAttention(
         name='pooling_attention',
-        hidden_dim=hidden_dim,
-        num_heads=self.num_heads,
-        use_bias=self.use_bias,
-        internal_enable_per_dim_scale=self.internal_enable_per_dim_scale,
-        use_qk_norm=self.use_qk_norm,
+        hidden_dim=hidden_dim, #? 3072
+        num_heads=self.num_heads,  #? 12
+        use_bias=self.use_bias,  #? True
+        internal_enable_per_dim_scale=self.internal_enable_per_dim_scale,  #? True
+        use_qk_norm=self.use_qk_norm,  #? False
     )(
-        query,
-        tokens,
-        tokens,
+        query,   #? (B,1,768)
+        tokens,  #? keys (B,4096,768)
+        tokens,  #? values (B,4096,768)
         atten_mask=atten_mask,
         train=train,
     )
 
-    if self.add_layer_norm:
+    if self.add_layer_norm: #? True
       outputs = LayerNorm(name='pooling_attention_layer_norm')(outputs)
 
     if self.dropout_prob > 0.0:

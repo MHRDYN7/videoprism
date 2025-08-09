@@ -338,7 +338,7 @@ class VisionTransformer(nn.Module):
       Output tensor of shape [B, N, D].
     """
     features = inputs
-    if paddings is None:
+    if paddings is None:  #? paddings is None for aux layer
       paddings = jnp.zeros(features.shape[:-1], dtype=features.dtype)
     features = layers.StackedTransformer(
         name='transformers_stack',
@@ -530,7 +530,7 @@ class FactorizedEncoder(nn.Module):      #? this is the main model
       outputs['spatial_features'] = einshape.jax_einshape(
           '(bt)nd->b(tn)d', spatial_features, t=t
       )
-    return embeddings, outputs
+    return embeddings, outputs  #? embeddings (1, 4096, 768), outputs dict with tensor (1, 16, 256, 768)
 
 
 class FactorizedVideoClassifier(nn.Module):
@@ -751,7 +751,7 @@ class FactorizedVideoCLIP(nn.Module):
 
     if inputs is not None:
       num_frames = inputs.shape[-4]
-      vision_features, vision_outputs = FactorizedEncoder(
+      vision_features, vision_outputs = FactorizedEncoder(  #? (1, 4096, 768) {key: value}
           name='vision_encoder',
           patch_size=self.patch_size,
           pos_emb_shape=self.pos_emb_shape,
@@ -770,13 +770,13 @@ class FactorizedVideoCLIP(nn.Module):
           frame_paddings=frame_paddings,
       )
       outputs.update(vision_outputs)
-      if return_intermediate:
-        outputs['spatiotemporal_features'] = vision_features
+      if return_intermediate:   #? False
+        outputs['spatiotemporal_features'] = vision_features  #? now the outputs dict has two keys; spatial_features and spatiotemporal_features
 
-      if self.num_auxiliary_layers > 0:
-        vision_features = VisionTransformer(
+      if self.num_auxiliary_layers > 0:  #? 2 aux layers
+        vision_features = VisionTransformer(   #? (1, 4096, 768) features are passed through the auxiliary encoder layer to get back to (1, 4096, 768) which are all attended embeds within the same video 
             name='auxiliary_encoder',
-            num_tfm_layers=self.num_auxiliary_layers,
+            num_tfm_layers=self.num_auxiliary_layers,  #? 2
             mlp_dim=self.mlp_dim,
             num_heads=self.num_heads,
             atten_logit_cap=self.atten_logit_cap,
@@ -790,7 +790,7 @@ class FactorizedVideoCLIP(nn.Module):
           num_heads=self.num_heads,
           num_queries=1,
       )
-      video_embeddings = pooling_layer(vision_features, None, train=train)
+      video_embeddings = pooling_layer(vision_features, None, train=train) #! most probably still (1, 4096, 768) but need to confirm
 
       # Squeeze the query dimension in the pooler output.
       video_embeddings = jnp.squeeze(video_embeddings, axis=-2)
