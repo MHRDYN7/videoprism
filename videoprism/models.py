@@ -158,9 +158,9 @@ CONFIGS = {
 }
 
 
-def videoprism_v1_base():
+def videoprism_v1_base():  #? step 3 returns a FactorizedEncoder object passed in with a dict of configs
   """Builds VideoPrism v1 base model."""
-  return encoders.FactorizedEncoder(**CONFIGS['videoprism_v1_base'])
+  return encoders.FactorizedEncoder(**CONFIGS['videoprism_v1_base'])  #! the dict of configs changes the configs of FactorizedEncoder object
 
 
 def videoprism_v1_large():
