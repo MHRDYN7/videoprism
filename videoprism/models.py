@@ -334,7 +334,7 @@ def load_text_tokenizer(name: str) -> tokenizers.Tokenizer:
     raise ValueError(f'Text tokenizer `{name}` not found.')
 
   model_path = TEXT_TOKENIZERS[name]['model_path']
-  return tokenizers.SentencePieceTokenizer(model_path)
+  return tokenizers.SentencePieceTokenizer(model_path) #? pass the model path 'gs://t5-data/vocabs/cc_en.32000/sentencepiece.model'
 
 
 def tokenize_texts(
